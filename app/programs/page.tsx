@@ -1,154 +1,145 @@
-// ...existing code...
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import api, { setAuthToken } from '../../lib/api';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { Program } from '../../types';
+import { programsApi } from '../../lib/api';
 
 export default function ProgramsPage() {
-  const [items, setItems] = useState<any[]>([]);
-  const [q, setQ] = useState('');
+  const [items, setItems] = useState<Program[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
   const router = useRouter();
   const limit = 10;
-  const totalPages = useMemo(() => Math.max(1, Math.ceil(total / limit)), [total, limit]);
 
-  // set auth token from localStorage on mount (if exists)
   useEffect(() => {
-    try {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      if (token) setAuthToken(token);
-    } catch {}
-  }, []);
+    const timer = setTimeout(() => {
+      fetchPrograms();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [search, page]);
 
-  const fetchList = useCallback(async (search: string, p: number) => {
+  async function fetchPrograms() {
     setLoading(true);
-    setError(null);
     try {
-      const res = await api.get('/programs', { params: { name: search, page: p, limit } });
-      setItems(res.data.items || []);
-      setTotal(res.data.total || 0);
-    } catch (err: any) {
+      const res = await programsApi.list({ name: search, page, limit });
+      setItems(res.data.items);
+      setTotal(res.data.total);
+    } catch (err) {
       console.error(err);
-      if (err?.response?.status === 401) {
-        // not authorized -> redirect to login
-        try { localStorage.removeItem('token'); } catch {}
-        router.push('/login');
-      } else {
-        setError('Error cargando programas. Intenta de nuevo.');
-      }
     } finally {
       setLoading(false);
     }
-  }, [router]);
-
-  // debounce search input
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setPage(1);
-      fetchList(q, 1);
-    }, 300);
-    return () => clearTimeout(t);
-  }, [q, fetchList]);
-
-  // fetch when page changes (but not overwrite search debounce)
-  useEffect(() => {
-    fetchList(q, page);
-  }, [page, fetchList]); // fetchList already depends on router
+  }
 
   return (
-    <div style={{ padding: 20, maxWidth: 900, margin: '0 auto' }}>
-      <h2 style={{ marginBottom: 12 }}>Programs</h2>
-
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-        <input
-          className="common-input"
-          placeholder="Buscar por nombre"
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          style={{ flex: 1 }}
-        />
+    <div className="p-6 max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-6">
+        <h1 className="text-2xl font-bold">Programs</h1>
         <button
-          className="common-button"
-          onClick={() => { setPage(1); fetchList(q, 1); }}
-        >
-          Buscar
-        </button>
-        <button
-          className="common-button"
           onClick={() => router.push('/programs/new')}
-          style={{ background: '#10b981' }}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg"
         >
-          Nuevo
+          New Program
         </button>
       </div>
 
-      {loading && <p style={{ color: '#6b7280' }}>Cargando...</p>}
-      {error && <p style={{ color: '#dc2626' }}>{error}</p>}
+      <div className="mb-4">
+        <input
+          type="search"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search programs..."
+          className="common-input"
+        />
+      </div>
 
-      {!loading && items.length === 0 && (
-        <div style={{ padding: 16, background: '#fff', borderRadius: 6 }}>
-          <p style={{ margin: 0 }}>No se encontraron programas. Crea uno nuevo.</p>
+      {loading ? (
+        <div>Loading...</div>
+      ) : items.length === 0 ? (
+        <div className="text-center py-8 text-gray-500">
+          No programs found. Create one!
+        </div>
+      ) : (
+        <div className="space-y-2">
+       
+{items.map((program) => (
+  <div
+    key={program._id}
+    className="p-4 border rounded-lg hover:bg-gray-50"
+  >
+    <div className="flex justify-between items-start">
+      <div>
+        <h3 className="font-medium">{program.name}</h3>
+        <p className="text-sm text-gray-500">{program.description}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className={`text-sm px-2 py-1 rounded ${
+          program.status === 'published' ? 'bg-green-100 text-green-800' :
+          program.status === 'archived' ? 'bg-gray-100 text-gray-800' :
+          'bg-yellow-100 text-yellow-800'
+        }`}>
+          {program.status}
+        </span>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            router.push(`/programs/${program._id}/edit`);
+          }}
+          className="px-3 py-1 bg-blue-600 text-white rounded-lg hover:bg-blue-700 text-sm"
+        >
+          Edit
+        </button>
+        <button
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (!confirm('Are you sure you want to delete this program?')) return;
+            try {
+              if (program._id) {
+                await programsApi.delete(program._id);
+                fetchPrograms();
+              } else {
+                alert('Program ID is undefined');
+              }
+              fetchPrograms();
+            } catch (err) {
+              console.error(err);
+              alert('Error deleting program');
+            }
+          }}
+          className="px-3 py-1 bg-red-600 text-white rounded-lg hover:bg-red-700 text-sm"
+        >
+          Delete
+        </button>
+      </div>
+    </div>
+  </div>
+))}
+
         </div>
       )}
 
-      <ul style={{ listStyle: 'none', padding: 0, marginTop: 12 }}>
-        {items.map((p) => (
-          <li
-            key={p._id || p.id}
-            style={{
-              padding: 12,
-              marginBottom: 8,
-              background: '#fff',
-              borderRadius: 6,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              cursor: 'pointer'
-            }}
-            onClick={() => router.push(`/programs/${p._id || p.id}`)}
-          >
-            <div>
-              <div style={{ fontWeight: 600 }}>{p.name}</div>
-              <div style={{ color: '#6b7280', fontSize: 13 }}>{p.description || '—'}</div>
-            </div>
-            <div style={{ color: '#6b7280', fontSize: 13 }}>{p.status || 'draft'}</div>
-          </li>
-        ))}
-      </ul>
-
-      <div style={{ marginTop: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+      <div className="mt-4 flex items-center justify-between">
         <button
-          className="common-button"
-          onClick={() => setPage((s) => Math.max(1, s - 1))}
-          disabled={page <= 1}
-          style={{ padding: '6px 10px' }}
+          onClick={() => setPage(p => Math.max(1, p - 1))}
+          disabled={page === 1}
+          className="px-4 py-2 border rounded-lg disabled:opacity-50"
         >
-          Prev
+          Previous
         </button>
-
-        <span style={{ color: '#6b7280' }}>
-          {page} / {totalPages}
+        <span>
+          Page {page} of {Math.ceil(total / limit)}
         </span>
-
         <button
-          className="common-button"
-          onClick={() => setPage((s) => Math.min(totalPages, s + 1))}
-          disabled={page >= totalPages}
-          style={{ padding: '6px 10px' }}
+          onClick={() => setPage(p => p + 1)}
+          disabled={page >= Math.ceil(total / limit)}
+          className="px-4 py-2 border rounded-lg disabled:opacity-50"
         >
           Next
         </button>
-
-        <div style={{ marginLeft: 'auto', color: '#6b7280', fontSize: 13 }}>
-          Total: {total}
-        </div>
       </div>
     </div>
   );
 }
-// ...existing code...
